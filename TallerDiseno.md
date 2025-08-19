@@ -4,7 +4,7 @@ Teniendo en cuenta el diagrama entidad relación resuelva los siguientes requeri
 ### DDL
 - Genere los comandos DDL que permitan la creación de la base de datos del DER suministrado.
 ```sql
-CREATE DATABASE mis_compras;
+CREATE DATABASE miscompras;
 
 CREATE TABLE clientes(
     id VARCHAR(20) PRIMARY KEY,
