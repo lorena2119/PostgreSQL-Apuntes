@@ -284,8 +284,35 @@ SET search_path TO miscompras
     WHERE p.estado = 1
         ANd p.cantidad_stock > 0
         AND p.nombre ILIKE 'caf%';
-
     ```
+
+6. Devuelve los productos con el precio formateado como texto monetario usando concatenación, ordenando de mayor a menor precio. 
+    - `TO_CHAR`
+    ```sql
+    SELECT nombre, '$ ' || TO_CHAR(precio_venta, 'FM999G999G999D00') as precio
+    FROM miscompras.productos p
+    ORDER BY precio_venta DESC;
+    ```
+
+7. Arma el “resumen de canasta” por compra: subtotal, `IVA al 19%` y total con IVA, sobre el total por ítem, agrupado por compra.
+    - `SUM`
+    - `ROUND`
+    ```sql
+    SELECT id_compra as id_compra, ROUND(SUM(total)) as subtotal, ROUND(SUM(total)) * 0.19 as iva_producto, ROUND(SUM(total) + SUM(total) * 0.19) as total
+    FROM miscompras.compras_productos
+    GROUP BY id_compra;
+    ```
+
+8. Calcula la participación (%) de cada categoría en las ventas usando agregaciones por categoría y una ventana sobre el total.
+    - `SUM`
+    - `ROUND`
+    - `OVER`
+    ```sql
+    SELECT id_compra as id_compra, ROUND(SUM(total)) as subtotal, ROUND(SUM(total)) * 0.19 as iva_producto, ROUND(SUM(total) + SUM(total) * 0.19) as total
+    FROM miscompras.compras_productos
+    GROUP BY id_compra;
+    ```
+
 23. Función: total de una compra (retorna NUMERIC)
     - `COALESCE`
     - `SUM`
@@ -304,4 +331,88 @@ SET search_path TO miscompras
     $$;
 
     -- SELECT miscompras.fn_total_compra(1);
+    ```
+
+20. Materialized view mensual
+    ```sql
+    -- Vista normal 
+    DROP VIEW IF EXISTS miscompras.reporte_mes;
+
+    CREATE OR REPLACE VIEW miscompras.reporte_mes AS
+    SELECT DATE_TRUNC('month', c.fecha) as mes,
+    SUM(cp.total) AS total_ventas
+    FROM miscompras.compras c
+    JOIN miscompras.compras_productos cp USING(id_compra)
+    GROUP BY mes;
+
+    SELECT * FROM miscompras.reporte_mes;
+
+    -- Vista Materializada
+    CREATE MATERIALIZED VIEW IF NOT EXISTS miscompras.reporte_mes AS
+    SELECT DATE_TRUNC('month', c.fecha) as mes,
+    SUM(cp.total) AS total_ventas
+    FROM miscompras.compras c
+    JOIN miscompras.compras_productos cp USING(id_compra)
+    GROUP BY mes;
+
+    SELECT * FROM miscompras.reporte_mes;
+
+    --Refrescar vista materializada
+    REFRESH VIEW miscompras.reporte_mes;
+    ```
+
+24. Trigger: al insertar detalle de compra, descuenta stock
+    - `GREATEST`
+    ```sql
+    CREATE OR REPLACE FUNCTION miscompras.trg_descuenta_stock()
+    RETURNS TRIGGER LANGUAGE plpgsql AS
+    $$
+    BEGIN
+        UPDATE miscompras.productos
+        SET cantidad_stock = GREATEST(0, cantidad_stock - NEW.cantidad)
+        WHERE id_producto = NEW.id_producto;
+        RETURN NEW;
+    END;
+    $$;
+
+    DROP TRIGGER IF EXISTS compras_productos_descuento_stock ON miscompras.compras_productos;
+    
+    CREATE TRIGGER compras_productos_descuento_stock
+    AFTER INSERT ON miscompras.compras_productos
+    FOR EACH ROW EXECUTE FUNCTION miscompras.trg_descuenta_stock();
+    ```
+
+27. Función: mostrar el valor total en formato moneda
+    - `TO CHAR`
+    ```sql
+    SELECT nombre, miscompras.toMoney(precio_venta) as precio
+    FROM miscompras.productos;
+    
+    CREATE OR REPLACE FUNCTION miscompras.toMoney(p_numeric NUMERIC)
+    RETURNS VARCHAR LANGUAGE plpgsql AS
+    $$
+    DECLARE valor VARCHAR(255);
+    BEGIN
+        SELECT CONCAT('$ ', TO_CHAR(p_numeric, 'FM999G999G999D00')) INTO valor;
+        RETURN valor;
+    END;
+    $$;
+    ```
+## Procedimientos de almacenado
+28. Procedimiento crear un nuevo cliente
+    - `INITCAP`
+    ```sql
+    -- Actualizar nombres
+    CREATE OR REPLACE PROCEDURE miscompras.pc_registrar_nuevo_cliente(p_nombre VARCHAR(100), p_apellido VARCHAR(100), p_celular NUMERIC(10, 0), p_direccion VARCHAR(80), p_email VARCHAR(70))
+    LANGUAGE plpgsql AS
+    $$
+    BEGIN
+        INSERT INTO miscompras.clientes(nombre, apellidos, celular, direccion, correo_electronico)
+        VALUES(INITCAP(TRIM(p_nombre)), INITCAP(TRIM(p_apellido)), p_celular, TRIM(p_direccion), TRIM(p_email));
+        RAISE NOTICE 'SE registró el usuario % exitosamente.', p_email;
+    EXCEPTION
+        WHEN OTHERS THEN
+            RAISE EXCEPTION 'Error al registrar al nuevo usuario, el usuario ya se encuentra registrado';
+    END;
+    $$;
     ```
