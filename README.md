@@ -308,9 +308,94 @@ SET search_path TO miscompras
     - `ROUND`
     - `OVER`
     ```sql
-    SELECT id_compra as id_compra, ROUND(SUM(total)) as subtotal, ROUND(SUM(total)) * 0.19 as iva_producto, ROUND(SUM(total) + SUM(total) * 0.19) as total
-    FROM miscompras.compras_productos
-    GROUP BY id_compra;
+    SELECT c.descripcion AS categoria,
+    SUM(cp.total) AS total_ventas_por_categoria,
+    ROUND((SUM(cp.total) / SUM(SUM(cp.total)) OVER () * 100), 2) AS porcentaje_participacion
+    FROM miscompras.compras_productos cp
+    JOIN miscompras.productos p ON cp.id_producto = p.id_producto
+    JOIN miscompras.categorias c ON p.id_categoria = c.id_categoria
+    GROUP BY c.descripcion
+    ORDER BY porcentaje_participacion DESC;
+    ```
+
+9. Clasifica el nivel de stock de productos activos (`CRÍTICO/BAJO/OK`) sobre el campo `cantidad_stock` y ordena por el stock ascendente.
+    - `CASE`
+    ```sql
+    SELECT nombre as producto, 
+    CASE 
+        WHEN cantidad_stock < 50 THEN 'Crítico'
+        WHEN cantidad_stock < 150 THEN 'BAJO'
+    ELSE
+        'OK'
+    END AS estado_stock
+    FROM miscompras.productos
+    ORDER BY cantidad_stock ASC;
+    ```
+
+10. Obtén la última compra por cliente utilizando`DISTINCT ON (id_cliente)` y una agregación del total de la compra.
+    - `ORDER BY`
+    - `DINSTINC ON`
+    ```sql
+    SELECT DISTINCT ON(c.id_cliente) c.id_cliente, cp.total as total_compra
+    FROM miscompras.compras as c
+    JOIN miscompras.compras_productos as cp USING(id_compra)
+    ORDER BY c.id_cliente, c.fecha DESC;
+    ```
+
+11. Devuelve los 2 productos más vendidos por categoría usando una subconsulta y luego filtrando `ROW_NUMBER` <= 2.
+    - `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY SUM(...) DESC)`
+    ```sql
+    SELECT DISTINCT ON(c.id_cliente) c.id_cliente, cp.total as total_compra
+    FROM miscompras.compras as c
+    JOIN miscompras.compras_productos as cp USING(id_compra)
+    ORDER BY c.id_cliente, c.fecha DESC;
+    ```
+
+12. Calcula ventas mensuales: agrupa por mes truncando la fecha, cuenta compras distintas y suma ventas, ordenando cronológicamente.
+    - `DATE_TRUNC('month', fecha)`
+    - `COUNT(DISTINCT ...)`
+    - `SUM`
+    ```sql
+    SELECT DATE_TRUNC('month', c.fecha) as mes, COUNT(DISTINCT c.id_compra) as compras_distintas, SUM(cp.total) as total_ventas
+    FROM miscompras.compras as c
+    JOIN miscompras.compras_productos as cp USING(id_compra)
+    GROUP BY mes
+    ORDER BY mes ASC;
+    ```
+
+13. Lista productos que nunca se han vendido mediante un anti-join, comparando por id_producto
+    - `NOT EXISTS`
+    ```sql
+    SELECT p.id_producto, p.nombre
+    FROM miscompras.productos p
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM miscompras.compras_productos as cp
+        WHERE cp.id_producto = p.id_producto
+    );
+    ```
+
+13. Identifica clientes que, al comprar “café”, también compran “pan” en la misma compra, usando un filtro con `ILIKE` y una subconsulta correlacionada con `EXISTS`.
+    - `EXISTS`
+    - `ILIKE`
+    ```sql
+    SELECT DISTINCT c.id, c.nombre, c.apellidos
+    FROM clientes c
+    JOIN miscompras.compras co ON c.id = co.id_cliente
+    WHERE EXISTS (
+        SELECT 1
+        FROM miscompras.compras_productos cp
+        JOIN miscompras.productos p1 ON cp.id_producto = p1.id_producto
+        WHERE cp.id_compra = co.id_compra
+        AND p1.nombre ILIKE '%café%'
+    )
+    AND EXISTS (
+        SELECT 1
+        FROM miscompras.compras_productos cp
+        JOIN miscompras.productos p2 ON cp.id_producto = p2.id_producto
+        WHERE cp.id_compra = co.id_compra
+        AND p2.nombre ILIKE '%pan%'
+    );
     ```
 
 23. Función: total de una compra (retorna NUMERIC)
@@ -398,6 +483,7 @@ SET search_path TO miscompras
     END;
     $$;
     ```
+    
 ## Procedimientos de almacenado
 28. Procedimiento crear un nuevo cliente
     - `INITCAP`
